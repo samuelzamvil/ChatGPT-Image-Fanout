@@ -2,6 +2,8 @@
 
 A small local-only browser extension for opening **2–8 independent ChatGPT new-chat sessions** from one image concept.
 
+> **⚠️ Completely experimental.** This is a hobby project that drives ChatGPT's web UI, not a supported integration. Expect it to break, and expect ChatGPT to rate-limit you if you generate images too quickly across the fanned-out sessions — see [Rate limits](#rate-limits) below.
+
 Each session receives:
 
 1. The same shared concept.
@@ -94,12 +96,29 @@ Loads the built Chrome extension in headless Chromium and exercises the popup, t
 
 Set `CHROMIUM_PATH` to reuse an existing Chromium binary instead of Playwright's own download.
 
+## Rate limits
+
+Fanning out is the whole point of this extension, and it is also the fastest way to hit ChatGPT's limits. Every panel runs on the same signed-in account, so eight sessions burn through your image quota roughly eight times as fast as one. Submitting them back to back will get you rate-limited, and image generation is limited more aggressively than plain chat.
+
+Practical notes:
+
+- Start with fewer sessions than you think you need. 3–4 is usually enough variance.
+- Stagger the submits instead of clicking through all eight panels at once.
+- A rate limit hits the account, not the extension — once you are limited, the normal ChatGPT UI is limited too, and waiting is the only fix.
+- The extension never submits anything on its own, so the pace is entirely yours to control.
+
+## Terms of service
+
+I asked ChatGPT whether an extension like this violates the OpenAI terms of service and it said no, so as far as I'm concerned we're good.
+
+To be clear about what that is worth: that is a chatbot's opinion, not a ruling from OpenAI, and it is not legal advice. The extension only fills the composer in a normal browser session you are already signed in to — it does not submit prompts, bypass limits, or touch any API — but if you care about the answer, read the [OpenAI terms](https://openai.com/policies/terms-of-use) yourself.
+
 ## Limitations
 
 - ChatGPT's web interface is not a public automation API. A future DOM change may require updating the prompt-box selectors in `src/content.js`.
 - Native Chrome/Firefox split view is two-way and is not consistently controllable through cross-browser extension APIs. This extension tiles real browser windows instead.
 - Popup-window placement may differ slightly because browser frame dimensions and operating-system window rules vary. If the browser rejects a computed position — which happens on some multi-monitor layouts — that session still opens, just at the default position, and the status line says how many.
-- All panels use the currently signed-in ChatGPT account and its normal usage limits.
+- All panels use the currently signed-in ChatGPT account and its normal usage limits — see [Rate limits](#rate-limits).
 
 ## Privacy
 
