@@ -36,6 +36,22 @@ npm run package        # also writes dist/*.zip
 
 `dist/` is generated and git-ignored — run a build before loading the extension.
 
+## Releases
+
+Every push to `main` and every pull request packages both targets in CI; the zips
+are attached to that run as the `extension-zips` artifact.
+
+Pushing a `v*` tag publishes a GitHub Release instead, with
+`chatgpt-image-fanout-chrome-<tag>.zip` and the Firefox equivalent as assets. The
+tag must match the version in `package.json` and both manifests, so bump those
+first:
+
+```sh
+git tag v0.2.1 && git push origin v0.2.1
+```
+
+A mismatched tag fails the release job before anything is published.
+
 ## Install in Chrome / Chromium
 
 1. `npm run build:chrome`
