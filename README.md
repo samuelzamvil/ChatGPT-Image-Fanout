@@ -40,19 +40,26 @@ npm run package        # also writes dist/*.zip
 
 ## Releases
 
-Every push to `main` and every pull request packages both targets in CI; the zips
-are attached to that run as the `extension-zips` artifact.
+Releases are cut from the version in the manifests, not from a manual tag. When a
+commit lands on `main`, CI looks for a release named `v<version>`; if there isn't
+one, it tags that commit and publishes a GitHub Release with
+`chatgpt-image-fanout-chrome-v<version>.zip` and the Firefox equivalent attached.
 
-Pushing a `v*` tag publishes a GitHub Release instead, with
-`chatgpt-image-fanout-chrome-<tag>.zip` and the Firefox equivalent as assets. The
-tag must match the version in `package.json` and both manifests, so bump those
-first:
+So publishing is a version bump:
 
 ```sh
-git tag v0.2.1 && git push origin v0.2.1
+# bump "version" in package.json, manifests/chrome.json, manifests/firefox.json
+git commit -am "Release 0.2.1" && git push
 ```
 
-A mismatched tag fails the release job before anything is published.
+Merges that don't touch the version publish nothing — the release for that
+version already exists. The three files have to agree on the version or the job
+fails before publishing anything. Pushing a `v*` tag by hand still works and
+takes the same path.
+
+Every push to `main` and every pull request also packages both targets as the
+`extension-zips` workflow artifact, which is how you get a build of a commit that
+isn't released.
 
 ## Install in Chrome / Chromium
 

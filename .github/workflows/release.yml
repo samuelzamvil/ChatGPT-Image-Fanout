@@ -2,10 +2,17 @@ name: release
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+# Two merges landing together must not race to create the same release.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -17,34 +24,61 @@ jobs:
         with:
           node-version: 22
 
-      # A store rejects an upload whose manifest version does not match what was
-      # released, so fail here rather than after the release exists.
-      - name: Check the tag matches package.json and both manifests
-        run: |
-          expected="${GITHUB_REF_NAME#v}"
-          status=0
-          for file in package.json manifests/chrome.json manifests/firefox.json; do
-            found=$(jq -r .version "$file")
-            if [ "$found" != "$expected" ]; then
-              echo "::error file=$file::version is $found but the tag is $GITHUB_REF_NAME"
-              status=1
-            fi
-          done
-          exit $status
-
-      - run: npm run package
-
-      - name: Name the assets after the release
-        run: |
-          for target in chrome firefox; do
-            mv "dist/chatgpt-image-fanout-$target.zip" \
-               "dist/chatgpt-image-fanout-$target-$GITHUB_REF_NAME.zip"
-          done
-
-      - name: Publish the release
+      # The manifest version is the source of truth: main publishes v<version>
+      # the first time it sees a version with no release, so a merged version
+      # bump ships and any other merge is a no-op. A store also rejects an
+      # upload whose manifest disagrees with the release it came from, so the
+      # files have to agree with each other before anything is published.
+      - name: Work out whether this commit publishes a release
+        id: plan
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.zip \
-            --title "$GITHUB_REF_NAME" \
+          version=$(jq -r .version manifests/chrome.json)
+          status=0
+          for file in package.json manifests/firefox.json; do
+            found=$(jq -r .version "$file")
+            if [ "$found" != "$version" ]; then
+              echo "::error file=$file::version is $found but manifests/chrome.json says $version"
+              status=1
+            fi
+          done
+          [ "$status" -eq 0 ] || exit "$status"
+
+          tag="v$version"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match manifest version $version"
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::notice::$tag is already released — bump the version to publish a new one"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.plan.outputs.publish == 'true'
+        run: npm run package
+
+      - name: Name the assets after the release
+        if: steps.plan.outputs.publish == 'true'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          for target in chrome firefox; do
+            mv "dist/chatgpt-image-fanout-$target.zip" \
+               "dist/chatgpt-image-fanout-$target-$TAG.zip"
+          done
+
+      - name: Publish the release
+        if: steps.plan.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          gh release create "$TAG" dist/*.zip \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
             --generate-notes
