@@ -1,0 +1,27 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No dependencies are needed to build — build.mjs only uses node builtins
+      # plus the `zip` binary that ubuntu-latest already has.
+      - run: npm run package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-zips
+          path: dist/*.zip
+          if-no-files-found: error

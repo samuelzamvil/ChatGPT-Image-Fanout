@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # A store rejects an upload whose manifest version does not match what was
+      # released, so fail here rather than after the release exists.
+      - name: Check the tag matches package.json and both manifests
+        run: |
+          expected="${GITHUB_REF_NAME#v}"
+          status=0
+          for file in package.json manifests/chrome.json manifests/firefox.json; do
+            found=$(jq -r .version "$file")
+            if [ "$found" != "$expected" ]; then
+              echo "::error file=$file::version is $found but the tag is $GITHUB_REF_NAME"
+              status=1
+            fi
+          done
+          exit $status
+
+      - run: npm run package
+
+      - name: Name the assets after the release
+        run: |
+          for target in chrome firefox; do
+            mv "dist/chatgpt-image-fanout-$target.zip" \
+               "dist/chatgpt-image-fanout-$target-$GITHUB_REF_NAME.zip"
+          done
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
