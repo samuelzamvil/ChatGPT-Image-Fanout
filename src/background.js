@@ -10,18 +10,66 @@ function token() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function autoColumns(count) {
-  if (count <= 4) return 2;
-  if (count <= 6) return 3;
-  return 4;
+// Neither browser will shrink a window below roughly this. Ask for less and you
+// get a window of the minimum size at the requested position, which is why a
+// too-fine grid overlaps instead of tiling. The grid is chosen against these
+// numbers rather than assuming any count fits on any screen.
+const MIN_TILE = { width: 500, height: 340 };
+
+function measure(count, columns, bounds) {
+  const rows = Math.ceil(count / columns);
+  const width = Math.floor(bounds.width / columns);
+  const height = Math.floor(bounds.height / rows);
+  return {
+    columns,
+    rows,
+    width,
+    height,
+    // Below 1 the browser refuses to shrink and the tiles start overlapping.
+    slack: Math.min(width / MIN_TILE.width, height / MIN_TILE.height),
+    holes: columns * rows - count,
+    // Tiles shaped like the screen beat tall slivers when both layouts fit.
+    skew: Math.abs(Math.log((width / height) / (bounds.width / bounds.height))),
+  };
 }
 
-function gridFor(count, columns) {
+// Every column count is a candidate. Prefer the layouts that actually fit, then
+// the tightest packing; if nothing fits, take the least-bad one so the sessions
+// still open somewhere sensible.
+function chooseGrid(count, bounds) {
+  let best = null;
+
+  for (let columns = 1; columns <= count; columns += 1) {
+    const candidate = measure(count, columns, bounds);
+    if (!best) {
+      best = candidate;
+      continue;
+    }
+
+    if (candidate.slack >= 1 && best.slack >= 1) {
+      // Halving the width and halving the height skew a tile by the same amount,
+      // so ties here are routine — and they land a few ulps apart, which without
+      // the epsilon lets float noise pick the layout. Columns ascend, so a tie
+      // goes to the later one: two sessions belong side by side, not stacked.
+      const better = candidate.holes < best.holes
+        || (candidate.holes === best.holes && candidate.skew <= best.skew + 1e-9);
+      if (better) best = candidate;
+    } else if (candidate.slack > best.slack) {
+      best = candidate;
+    }
+  }
+
+  return best;
+}
+
+function gridFor(count, columns, bounds) {
   const requested = Number(columns);
-  const resolved = Number.isInteger(requested) && requested >= 1 && requested <= 4
-    ? Math.min(requested, count)
-    : autoColumns(count);
-  return { columns: resolved, rows: Math.ceil(count / resolved) };
+  // An explicit column count is an instruction, not a hint: honour it even when
+  // it does not fit, and let the status line say so.
+  if (Number.isInteger(requested) && requested >= 1) {
+    return measure(count, Math.min(requested, count), bounds);
+  }
+  return chooseGrid(count, bounds);
 }
 
 function normalizeBounds(bounds) {
@@ -75,8 +123,19 @@ function chatUrl(jobToken, slot) {
   return `https://chatgpt.com/#fanout=${encodeURIComponent(jobToken)}&slot=${slot}`;
 }
 
+// Frames and shadows make the settled geometry differ from the request by a few
+// pixels even when placement worked, so only count real drift.
+const PLACEMENT_TOLERANCE = 24;
+
+function drifted(window, bounds) {
+  return Math.abs(window.left - bounds.left) > PLACEMENT_TOLERANCE
+    || Math.abs(window.top - bounds.top) > PLACEMENT_TOLERANCE
+    || Math.abs(window.width - bounds.width) > PLACEMENT_TOLERANCE
+    || Math.abs(window.height - bounds.height) > PLACEMENT_TOLERANCE;
+}
+
 async function createTiledWindows(jobToken, prompts, screenBounds, grid) {
-  let unpositioned = 0;
+  const placed = [];
 
   for (let index = 0; index < prompts.length; index += 1) {
     const bounds = tileBounds(index, prompts.length, screenBounds, grid);
@@ -85,15 +144,48 @@ async function createTiledWindows(jobToken, prompts, screenBounds, grid) {
     // Browsers reject bounds they consider off-screen — negative availLeft on a
     // secondary monitor, DPI scaling, a display unplugged mid-launch. Losing the
     // tiling is acceptable; losing the session is not.
+    let created;
     try {
-      await api.windows.create({ ...base, ...bounds });
+      created = await api.windows.create({ ...base, ...bounds });
     } catch {
-      unpositioned += 1;
-      await api.windows.create(base);
+      await api.windows.create(base).catch(() => {});
+      continue;
     }
+
+    // Chrome honours create-time bounds inconsistently — it reports the bounds
+    // you asked for and then sizes the window differently. Re-asserting through
+    // windows.update after the window exists is what actually sticks.
+    try {
+      await api.windows.update(created.id, bounds);
+    } catch {
+      // The verification pass below reports whatever we ended up with.
+    }
+
+    placed.push({ id: created.id, bounds });
   }
 
-  return unpositioned;
+  return placed;
+}
+
+// windows.create resolves before the window has settled, and it never throws on
+// bounds it silently declines, so the only honest way to know whether tiling
+// worked is to look afterwards.
+async function countMisplaced(placed) {
+  if (!placed.length) return 0;
+
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  try {
+    const all = await api.windows.getAll();
+    const byId = new Map(all.map((window) => [window.id, window]));
+    return placed.filter(({ id, bounds }) => {
+      const window = byId.get(id);
+      // A window the user already closed is not a placement failure.
+      return window ? drifted(window, bounds) : false;
+    }).length;
+  } catch {
+    return 0;
+  }
 }
 
 async function createTabs(jobToken, prompts) {
@@ -138,9 +230,18 @@ async function launchFanout(message) {
   }
 
   const bounds = await resolveBounds(message);
-  const grid = gridFor(prompts.length, message.columns);
-  const unpositioned = await createTiledWindows(jobToken, prompts, bounds, grid);
-  return { ok: true, unpositioned };
+  const grid = gridFor(prompts.length, message.columns, bounds);
+  const placed = await createTiledWindows(jobToken, prompts, bounds, grid);
+
+  return {
+    ok: true,
+    unpositioned: await countMisplaced(placed),
+    columns: grid.columns,
+    rows: grid.rows,
+    // The screen cannot hold this many windows at the browser's minimum size, so
+    // they will overlap no matter how the grid is arranged.
+    cramped: grid.slack < 1,
+  };
 }
 
 // Reuse an already-open detached window instead of stacking duplicates.

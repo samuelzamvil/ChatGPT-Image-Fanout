@@ -17,13 +17,12 @@ The extension fills the ChatGPT composer but **does not submit the prompt**.
 - 2–8 sessions.
 - Separate variance field for every session.
 - **Labelled windows** — each session's title bar carries its slot and variance, so tiled panels are tellable apart.
-- Tiled popup windows with a **choice of column count** and tiling across the whole screen or just the current window.
+- Tiled popup windows with a **choice of column count** and tiling across the whole screen or just the current window. The automatic grid is chosen against the browser's minimum window size, so it never asks for tiles the browser will refuse to shrink to.
 - Alternative tab mode.
 - **Detachable window** so the form survives clicking into another tab.
 - **Saved sets** — name and reload a whole concept plus its variances.
 - **Bulk paste** a list of variances instead of filling eight fields by hand.
 - One-click preset fill for empty variance fields.
-- Warns before launching sessions that would be identical.
 - `Ctrl`/`Cmd` + `Enter` to launch.
 - Remembers the last form locally.
 - No API key, server, analytics, or network calls by the extension.
@@ -93,7 +92,7 @@ A permanent Firefox installation requires signing through Mozilla Add-ons.
 7. Click **Launch** (or press `Ctrl`/`Cmd` + `Enter`).
 8. Review each loaded prompt and submit it in that panel.
 
-Sessions left without a variance instruction collapse to the bare shared concept and would be identical to each other, so the first Launch click warns and marks them; click again to proceed anyway.
+Launch always launches. A session left without a variance instruction collapses to the bare shared concept, which is sometimes exactly what you want as a control.
 
 ### Telling the windows apart
 
@@ -109,7 +108,13 @@ Every session is the same site under the same account, so tiled panels are other
 
 ### Tiling
 
-**Tile columns** is `Auto` by default, which keeps the original layout (2 columns up to 4 sessions, 3 up to 6, then 4). Pin it to a fixed number when a wide monitor wants everything in one row or a tall one wants a single column. **Tile across** chooses between the whole monitor and the bounds of the current browser window, which is the useful option when the browser occupies half an ultrawide.
+Neither browser will shrink a window below roughly 500×340. Ask for less and you get a minimum-size window at the requested position — which is why a grid finer than the screen can hold overlaps instead of tiling, and why eight sessions on a 1440-wide laptop cannot tile no matter how the grid is arranged.
+
+**Tile columns** is `Auto` by default, which scores every column count against that minimum and picks the layout that fits with the least wasted space and the squarest tiles. On a 1920×1080 screen that is 2 columns for 2–4 sessions, 3 for 6, and 3×3 for 8 — a 4×2 grid would need 480px-wide windows, which the browser declines. Pin it to a fixed number to override; an explicit choice is honoured even when it does not fit, and the status line says so.
+
+**Tile across** chooses between the whole monitor and the bounds of the current browser window, which is the useful option when the browser occupies half an ultrawide.
+
+The status line after a launch reports what actually happened: the grid used, whether the screen was too small to hold the sessions at minimum size, and whether any window refused the position it was given.
 
 ## Tests
 
@@ -144,7 +149,7 @@ I asked ChatGPT whether this violates the OpenAI terms of service and he said no
 - ChatGPT's web interface is not a public automation API. A future DOM change may require updating the prompt-box selectors in `src/content.js`.
 - The window label is cosmetic and lives only for that page load. Reloading a labelled session clears it, because the launch job it came from is already gone.
 - Native Chrome/Firefox split view is two-way and is not consistently controllable through cross-browser extension APIs. This extension tiles real browser windows instead.
-- Popup-window placement may differ slightly because browser frame dimensions and operating-system window rules vary. If the browser rejects a computed position — which happens on some multi-monitor layouts — that session still opens, just at the default position, and the status line says how many.
+- Window placement is a request, not a guarantee. `windows.create` reports the bounds you asked for and then lets the platform decide, so the extension re-asserts each position with `windows.update` and checks the result afterwards rather than trusting the call. A tiling desktop or a window manager that overrides application placement will still win; the sessions open regardless and the status line says how many drifted.
 - All panels use the currently signed-in ChatGPT account and its normal usage limits — see [Rate limits](#rate-limits).
 
 ## Privacy

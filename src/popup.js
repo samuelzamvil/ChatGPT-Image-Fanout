@@ -47,7 +47,6 @@ const LABEL_MAX = 40;
 let varianceValues = Array(MAX_SESSIONS).fill('');
 let savedSets = [];
 let saveTimer;
-let blankWarningIssued = false;
 
 function activeMode() {
   return document.querySelector('input[name="mode"]:checked').value;
@@ -82,11 +81,7 @@ function createVarianceRow(index) {
   area.value = varianceValues[index] ?? '';
   area.placeholder = placeholderFor(index);
   area.setAttribute('aria-label', `Variance instruction for session ${index + 1}`);
-  area.addEventListener('input', () => {
-    blankWarningIssued = false;
-    area.classList.remove('blank');
-    scheduleSave();
-  });
+  area.addEventListener('input', scheduleSave);
 
   row.append(badge, area);
   return row;
@@ -142,10 +137,8 @@ function applySettings(settings) {
 
   for (const area of variances.querySelectorAll('textarea')) {
     area.value = varianceValues[Number(area.dataset.index)] ?? '';
-    area.classList.remove('blank');
   }
 
-  blankWarningIssued = false;
   renderVariances();
 }
 
@@ -181,21 +174,6 @@ function composePrompt(shared, direction, style) {
   return `${base}\n\nVARIANCE DIRECTION FOR THIS SESSION:\n${variance}\n\nTreat this as an independent first interpretation. Do not converge toward a safe compromise or assume any visual choices from other sessions.`;
 }
 
-function blankIndexes(count) {
-  syncValuesFromDom();
-  const blanks = [];
-  for (let index = 0; index < count; index += 1) {
-    if (!varianceValues[index]?.trim()) blanks.push(index);
-  }
-  return blanks;
-}
-
-function markBlanks(indexes) {
-  for (const area of variances.querySelectorAll('textarea')) {
-    area.classList.toggle('blank', indexes.includes(Number(area.dataset.index)));
-  }
-}
-
 function fillEmptyVariances() {
   syncValuesFromDom();
   const count = Number(countSelect.value);
@@ -210,10 +188,8 @@ function fillEmptyVariances() {
   for (const area of variances.querySelectorAll('textarea')) {
     const index = Number(area.dataset.index);
     area.value = varianceValues[index];
-    area.classList.remove('blank');
   }
 
-  blankWarningIssued = false;
   setStatus(filled ? `Filled ${filled} empty ${filled === 1 ? 'field' : 'fields'}.` : 'Nothing to fill.');
   void saveSettings();
 }
@@ -341,11 +317,9 @@ function applyBulk() {
   for (const area of variances.querySelectorAll('textarea')) {
     const index = Number(area.dataset.index);
     area.value = varianceValues[index] ?? '';
-    area.classList.remove('blank');
   }
 
   renderVariances();
-  blankWarningIssued = false;
   bulkPanel.hidden = true;
   bulkText.value = '';
   void saveSettings();
@@ -360,6 +334,25 @@ function labelFor(variance) {
   return first.length > LABEL_MAX ? `${first.slice(0, LABEL_MAX - 1).trimEnd()}…` : first;
 }
 
+// The old message claimed a clean tiling it never checked. Say what happened.
+function launchSummary(settings, response) {
+  const opened = `Opened ${settings.count} sessions`;
+  if (settings.mode === 'tabs') return `${opened} as tabs.`;
+
+  const grid = response.columns && response.rows ? ` in a ${response.columns}×${response.rows} grid` : '';
+  const misplaced = response.unpositioned ?? 0;
+
+  if (misplaced) {
+    return `${opened}${grid}, but ${misplaced} ${misplaced === 1 ? 'window' : 'windows'} would not take the tiled position. `
+      + 'Some window managers override extension placement.';
+  }
+  if (response.cramped) {
+    return `${opened}${grid}. This screen is too small to fit them all at the browser's minimum window size, so they overlap — `
+      + 'try fewer sessions or tabs instead.';
+  }
+  return `${opened}${grid}.`;
+}
+
 async function launch() {
   const settings = currentSettings();
   const shared = settings.basePrompt.trim();
@@ -367,20 +360,6 @@ async function launch() {
   if (!shared) {
     setStatus('Enter a shared image concept.', true);
     basePrompt.focus();
-    return;
-  }
-
-  // Blank variances collapse to the bare shared concept, so those sessions would
-  // be byte-identical to each other. Warn once, then let it through.
-  const blanks = blankIndexes(settings.count);
-  if (blanks.length && !blankWarningIssued) {
-    const labels = blanks.map((index) => index + 1).join(', ');
-    markBlanks(blanks);
-    blankWarningIssued = true;
-    setStatus(
-      `Session${blanks.length === 1 ? '' : 's'} ${labels} ${blanks.length === 1 ? 'has' : 'have'} no variance and would be identical. Launch again to proceed.`,
-      true,
-    );
     return;
   }
 
@@ -414,11 +393,7 @@ async function launch() {
 
     if (!response?.ok) throw new Error(response?.error || 'The extension could not open the sessions.');
 
-    const unpositioned = response.unpositioned ?? 0;
-    setStatus(unpositioned
-      ? `Opened ${settings.count} sessions. ${unpositioned} could not be tiled and opened at the default position.`
-      : `Opened ${settings.count} independent sessions.`);
-    blankWarningIssued = false;
+    setStatus(launchSummary(settings, response));
 
     // A detached window is meant to stay open for the next round.
     if (isDetached) {
@@ -439,9 +414,7 @@ async function clearForm() {
   varianceValues = Array(MAX_SESSIONS).fill('');
   for (const area of variances.querySelectorAll('textarea')) {
     area.value = '';
-    area.classList.remove('blank');
   }
-  blankWarningIssued = false;
   // The form no longer reflects whatever set was loaded.
   savedSetsSelect.value = '';
   deleteSetButton.disabled = true;
