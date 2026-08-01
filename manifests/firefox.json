@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Image Fanout",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Fan one image concept out into 2–8 independent ChatGPT sessions with separate variance instructions.",
   "permissions": ["storage", "tabs"],
   "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],

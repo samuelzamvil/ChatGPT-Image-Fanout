@@ -16,6 +16,27 @@
     </div>
     <p class="subtitle">Open independent new-chat panels with one shared concept and separate variance instructions. Prompts are filled but not submitted.</p>
 
+    <div class="set-row">
+      <label for="savedSets">Saved sets
+        <select id="savedSets">
+          <option value="">— none saved —</option>
+        </select>
+      </label>
+      <div class="set-buttons">
+        <button id="saveSet" type="button" class="ghost">Save…</button>
+        <button id="deleteSet" type="button" class="ghost">Delete</button>
+      </div>
+    </div>
+
+    <div id="saveSetPanel" class="panel" hidden>
+      <label for="setName">Name this set</label>
+      <input id="setName" type="text" maxlength="60" placeholder="Product hero shots">
+      <div class="panel-actions">
+        <button id="confirmSaveSet" type="button" class="ghost">Save set</button>
+        <button id="cancelSaveSet" type="button" class="ghost">Cancel</button>
+      </div>
+    </div>
+
     <label for="basePrompt">Shared image concept</label>
     <textarea id="basePrompt" placeholder="Describe the subject, non-negotiable elements, aspect ratio, required text, and anything every direction must preserve."></textarea>
 
@@ -49,10 +70,42 @@
       </div>
     </fieldset>
 
+    <div class="row" id="layoutRow">
+      <label for="columns">Tile columns
+        <select id="columns">
+          <option value="auto" selected>Auto</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+        </select>
+      </label>
+
+      <label for="tileTarget">Tile across
+        <select id="tileTarget">
+          <option value="screen" selected>Whole screen</option>
+          <option value="window">Current window</option>
+        </select>
+      </label>
+    </div>
+
     <div class="variance-header">
       <h2>Variance instructions</h2>
-      <button id="suggest" type="button" class="ghost">Fill empty</button>
+      <div class="variance-tools">
+        <button id="bulk" type="button" class="ghost">Paste list…</button>
+        <button id="suggest" type="button" class="ghost">Fill empty</button>
+      </div>
     </div>
+
+    <div id="bulkPanel" class="panel" hidden>
+      <label for="bulkText">One variance per line, or separate multi-line entries with <code>---</code></label>
+      <textarea id="bulkText" placeholder="cinematic realism, sodium-vapor night lighting&#10;flat editorial poster, hard geometric silhouettes&#10;tactile handmade collage, torn paper edges"></textarea>
+      <div class="panel-actions">
+        <button id="applyBulk" type="button" class="ghost">Apply</button>
+        <button id="cancelBulk" type="button" class="ghost">Cancel</button>
+      </div>
+    </div>
+
     <div id="variances"></div>
 
     <p id="status" role="status" aria-live="polite"></p>

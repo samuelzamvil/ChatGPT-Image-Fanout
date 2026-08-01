@@ -115,6 +115,140 @@ const check = (name, pass, detail = '') => {
   check('Fill empty populates all 5', filled.length === 5 && filled.every((v) => v.trim()), `n=${filled.length}`);
   check('presets are all distinct', new Set(filled).size === 5, `unique=${new Set(filled).size}`);
 
+  // --- 6b. Bulk paste fills rows and matches the session count ---
+  const bulk = await page.evaluate(async () => {
+    document.querySelector('#bulk').click();
+    const box = document.querySelector('#bulkText');
+    box.value = 'alpha line\nbeta line\ngamma line';
+    document.querySelector('#applyBulk').click();
+    await new Promise((r) => setTimeout(r, 60));
+    return {
+      values: [...document.querySelectorAll('#variances textarea')].map((a) => a.value),
+      count: document.querySelector('#count').value,
+      panelHidden: document.querySelector('#bulkPanel').hidden,
+    };
+  });
+  check('bulk paste fills one row per line', bulk.values.join('|') === 'alpha line|beta line|gamma line', JSON.stringify(bulk.values));
+  check('bulk paste sets the session count to the list length', bulk.count === '3', `count=${bulk.count}`);
+  check('bulk panel closes after applying', bulk.panelHidden === true);
+
+  // `---` rules let a single variance span multiple lines.
+  const bulkRules = await page.evaluate(async () => {
+    document.querySelector('#bulk').click();
+    const box = document.querySelector('#bulkText');
+    box.value = 'first line one\nfirst line two\n---\nsecond entry';
+    document.querySelector('#applyBulk').click();
+    await new Promise((r) => setTimeout(r, 60));
+    return [...document.querySelectorAll('#variances textarea')].map((a) => a.value);
+  });
+  check('--- separator keeps multi-line entries together',
+    bulkRules.length === 2 && bulkRules[0] === 'first line one\nfirst line two' && bulkRules[1] === 'second entry',
+    JSON.stringify(bulkRules));
+
+  // --- 6c. Saved sets round-trip through storage ---
+  const sets = await page.evaluate(async () => {
+    document.querySelector('#basePrompt').value = 'SET-CONCEPT';
+    document.querySelector('#basePrompt').dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#saveSet').click();
+    document.querySelector('#setName').value = 'my set';
+    document.querySelector('#confirmSaveSet').click();
+    await new Promise((r) => setTimeout(r, 120));
+
+    const options = [...document.querySelectorAll('#savedSets option')].map((o) => o.value);
+
+    // Wipe the form, then load the set back.
+    document.querySelector('#clear').click();
+    await new Promise((r) => setTimeout(r, 120));
+    const cleared = document.querySelector('#basePrompt').value;
+
+    const select = document.querySelector('#savedSets');
+    select.value = 'my set';
+    select.dispatchEvent(new Event('change'));
+    await new Promise((r) => setTimeout(r, 120));
+
+    return {
+      options,
+      cleared,
+      restored: document.querySelector('#basePrompt').value,
+      variances: [...document.querySelectorAll('#variances textarea')].map((a) => a.value),
+    };
+  });
+  const persisted = await sw.evaluate(async () => (await chrome.storage.local.get('fanoutSets')).fanoutSets);
+  check('saving adds the set to the picker', sets.options.includes('my set'), JSON.stringify(sets.options));
+  check('sets persist to storage', Array.isArray(persisted) && persisted.some((s) => s.name === 'my set'), JSON.stringify(persisted));
+  check('clear empties the form', sets.cleared === '');
+  check('loading a set restores the concept', sets.restored === 'SET-CONCEPT', `restored=${sets.restored}`);
+  check('loading a set restores the variances', sets.variances.join('|') === 'first line one\nfirst line two|second entry', JSON.stringify(sets.variances));
+
+  const deleted = await page.evaluate(async () => {
+    document.querySelector('#deleteSet').click();
+    await new Promise((r) => setTimeout(r, 120));
+    return [...document.querySelectorAll('#savedSets option')].map((o) => o.value);
+  });
+  check('deleting removes the set', !deleted.includes('my set'), JSON.stringify(deleted));
+
+  // --- 6d. Layout controls hide in tabs mode and reach the background ---
+  const layout = await page.evaluate(async () => {
+    const tabs = document.querySelector('input[name="mode"][value="tabs"]');
+    tabs.checked = true; tabs.dispatchEvent(new Event('change'));
+    const hiddenInTabs = document.querySelector('#layoutRow').hidden;
+
+    const windows = document.querySelector('input[name="mode"][value="windows"]');
+    windows.checked = true; windows.dispatchEvent(new Event('change'));
+    const shownInWindows = document.querySelector('#layoutRow').hidden;
+
+    document.querySelector('#columns').value = '3';
+    document.querySelector('#columns').dispatchEvent(new Event('change'));
+    document.querySelector('#tileTarget').value = 'window';
+    document.querySelector('#tileTarget').dispatchEvent(new Event('change'));
+    await new Promise((r) => setTimeout(r, 350));
+    return { hiddenInTabs, shownInWindows };
+  });
+  const layoutSaved = await sw.evaluate(async () => {
+    const s = (await chrome.storage.local.get('fanoutSettings')).fanoutSettings;
+    return { columns: s?.columns, tileTarget: s?.tileTarget };
+  });
+  check('layout row hides in tabs mode', layout.hiddenInTabs === true);
+  check('layout row returns in windows mode', layout.shownInWindows === false);
+  check('layout choices persist', layoutSaved.columns === '3' && layoutSaved.tileTarget === 'window', JSON.stringify(layoutSaved));
+
+  // Grid math, straight from the worker: an explicit column count wins, "auto"
+  // falls back, and the trailing window of a partial row reaches the edge.
+  const grid = await sw.evaluate(() => {
+    const screen = { left: 0, top: 0, width: 1200, height: 800 };
+    const explicit = gridFor(6, 2);
+    const auto = gridFor(6, undefined);
+    const clamped = gridFor(2, 4);
+    const partial = tileBounds(4, 5, screen, gridFor(5, 2));
+    return { explicit, auto, clamped, partial };
+  });
+  check('explicit column count is honoured', grid.explicit.columns === 2 && grid.explicit.rows === 3, JSON.stringify(grid.explicit));
+  check('auto keeps the original layout', grid.auto.columns === 3 && grid.auto.rows === 2, JSON.stringify(grid.auto));
+  check('columns never exceed the session count', grid.clamped.columns === 2, JSON.stringify(grid.clamped));
+  check('trailing window of a partial row spans the width', grid.partial.width === 1200 && grid.partial.left === 0, JSON.stringify(grid.partial));
+
+  // --- 6e. Labels ride along with the job records ---
+  const labelled = await page.evaluate(async () => {
+    const api = globalThis.browser ?? globalThis.chrome;
+    return api.runtime.sendMessage({
+      type: 'launch-fanout',
+      prompts: ['p1', 'p2'],
+      labels: ['tactile handmade collage', ''],
+      mode: 'tabs',
+      screenBounds: {},
+    });
+  });
+  const jobRecords = await sw.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    return Object.entries(all)
+      .filter(([k]) => k.startsWith('fanoutJob:'))
+      .map(([, v]) => ({ label: v.label, slot: v.slot }));
+  });
+  check('labelled launch succeeds', labelled?.ok === true, JSON.stringify(labelled));
+  check('job records carry label and slot',
+    jobRecords.some((r) => r.label === 'tactile handmade collage' && r.slot === 1) && jobRecords.some((r) => r.label === '' && r.slot === 2),
+    JSON.stringify(jobRecords));
+
   // --- 7. Detached UI ---
   const detachedUi = await page.evaluate(() => ({
     hasDetachButton: !!document.querySelector('#detach'),
