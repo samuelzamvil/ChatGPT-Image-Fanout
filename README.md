@@ -14,9 +14,12 @@ The extension fills the ChatGPT composer but **does not submit the prompt**.
 
 - 2–8 sessions.
 - Separate variance field for every session.
-- Tiled popup windows across the current monitor.
+- **Labelled windows** — each session's title bar carries its slot and variance, so tiled panels are tellable apart.
+- Tiled popup windows with a **choice of column count** and tiling across the whole screen or just the current window.
 - Alternative tab mode.
 - **Detachable window** so the form survives clicking into another tab.
+- **Saved sets** — name and reload a whole concept plus its variances.
+- **Bulk paste** a list of variances instead of filling eight fields by hand.
 - One-click preset fill for empty variance fields.
 - Warns before launching sessions that would be identical.
 - `Ctrl`/`Cmd` + `Enter` to launch.
@@ -76,12 +79,28 @@ A permanent Firefox installation requires signing through Mozilla Add-ons.
 2. Optionally click **Open in window** to detach the form — the toolbar popup closes whenever you click away, which loses your place in a long form. The detached window stays put and stays open across launches.
 3. Enter the shared concept.
 4. Select 2–8 sessions.
-5. Give each session a distinct variance instruction, or click **Fill empty** to drop in presets.
-6. Choose **Tiled windows** or **Tabs**.
+5. Give each session a distinct variance instruction, or click **Fill empty** for presets or **Paste list…** for a list you already have.
+6. Choose **Tiled windows** or **Tabs**, and for windows pick the column count and whether to tile across the screen or the current window.
 7. Click **Launch** (or press `Ctrl`/`Cmd` + `Enter`).
 8. Review each loaded prompt and submit it in that panel.
 
 Sessions left without a variance instruction collapse to the bare shared concept and would be identical to each other, so the first Launch click warns and marks them; click again to proceed anyway.
+
+### Telling the windows apart
+
+Every session is the same site under the same account, so tiled panels are otherwise indistinguishable. Each window's title is prefixed with its slot number and the first clause of its variance — `3 · tactile handmade collage · ChatGPT`. Sessions launched without a variance fall back to `Session 3`. ChatGPT rewrites the title as you navigate, so the label is re-applied rather than set once.
+
+### Saved sets
+
+**Save…** stores the shared concept, the session count, the direction label, and every variance instruction under a name; picking that name from **Saved sets** loads it back. Saving under an existing name overwrites it. Window mode and tiling stay as standing preferences and are deliberately not part of a set — they describe your screen, not the concept.
+
+### Bulk paste
+
+**Paste list…** takes one variance per line. If the pasted text contains a line that is just `---`, entries are split on those rules instead, so a single variance can span several lines. The session count follows the list length; anything beyond it stays in memory and comes back if you raise the count again.
+
+### Tiling
+
+**Tile columns** is `Auto` by default, which keeps the original layout (2 columns up to 4 sessions, 3 up to 6, then 4). Pin it to a fixed number when a wide monitor wants everything in one row or a tall one wants a single column. **Tile across** chooses between the whole monitor and the bounds of the current browser window, which is the useful option when the browser occupies half an ultrawide.
 
 ## Tests
 
@@ -97,19 +116,20 @@ Set `CHROMIUM_PATH` to reuse an existing Chromium binary instead of Playwright's
 ## Limitations
 
 - ChatGPT's web interface is not a public automation API. A future DOM change may require updating the prompt-box selectors in `src/content.js`.
+- The window label is cosmetic and lives only for that page load. Reloading a labelled session clears it, because the launch job it came from is already gone.
 - Native Chrome/Firefox split view is two-way and is not consistently controllable through cross-browser extension APIs. This extension tiles real browser windows instead.
 - Popup-window placement may differ slightly because browser frame dimensions and operating-system window rules vary. If the browser rejects a computed position — which happens on some multi-monitor layouts — that session still opens, just at the default position, and the status line says how many.
 - All panels use the currently signed-in ChatGPT account and its normal usage limits.
 
 ## Privacy
 
-The extension stores the current form and short-lived launch jobs in browser local extension storage. A launch job is deleted once its prompt reaches the composer, and any leftovers are cleared after approximately 15 minutes. Nothing is sent anywhere except when you manually submit a prompt to ChatGPT.
+The extension stores the current form, your saved sets, and short-lived launch jobs in browser local extension storage. A launch job is deleted once its prompt reaches the composer, and any leftovers are cleared after approximately 15 minutes. Saved sets persist until you delete them. Nothing is sent anywhere except when you manually submit a prompt to ChatGPT.
 
 ## Files
 
 - `src/popup.html`, `src/popup.js`, `src/popup.css`: form UI.
-- `src/background.js`: stores jobs, opens tabs/windows, manages the detached window.
-- `src/content.js`: fills the ChatGPT composer.
+- `src/background.js`: stores jobs, computes the tiling grid, opens tabs/windows, manages the detached window.
+- `src/content.js`: labels the window and fills the ChatGPT composer.
 - `manifests/chrome.json`, `manifests/firefox.json`: per-browser manifests.
 - `build.mjs`: assembles `dist/<target>` from `src/` plus the matching manifest.
 

@@ -53,7 +53,7 @@ label, legend {
   font-weight: 650;
 }
 
-textarea, select, input[type="number"] {
+textarea, select, input[type="number"], input[type="text"] {
   width: 100%;
   margin-top: 6px;
   border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
@@ -70,7 +70,7 @@ textarea {
   line-height: 1.42;
 }
 
-select, input[type="number"] {
+select, input[type="number"], input[type="text"] {
   height: 36px;
   padding: 0 9px;
 }
@@ -80,6 +80,48 @@ select, input[type="number"] {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   margin-top: 13px;
+}
+
+.row[hidden] { display: none; }
+
+.set-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.set-buttons {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 5px;
+}
+
+/* Inline panels for naming a set and for bulk-pasting variances. */
+.panel {
+  margin-top: 10px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
+}
+
+.panel[hidden] { display: none; }
+
+.panel textarea { min-height: 92px; }
+
+.panel code {
+  padding: 0 3px;
+  border-radius: 4px;
+  background: color-mix(in srgb, CanvasText 12%, transparent);
+  font-size: 11px;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
 }
 
 fieldset {
@@ -113,6 +155,11 @@ fieldset {
   margin: 0;
   font-size: 12px;
   font-weight: 650;
+}
+
+.variance-tools {
+  display: flex;
+  gap: 6px;
 }
 
 #variances {

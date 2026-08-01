@@ -1,6 +1,7 @@
 const api = globalThis.browser ?? globalThis.chrome;
 const JOB_PREFIX = 'fanoutJob:';
 const JOB_TTL_MS = 15 * 60 * 1000;
+const LABEL_MAX = 40;
 const DETACHED_URL = 'popup.html?detached=1';
 
 function token() {
@@ -9,11 +10,18 @@ function token() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function gridFor(count) {
-  if (count <= 2) return { columns: 2, rows: 1 };
-  if (count <= 4) return { columns: 2, rows: 2 };
-  if (count <= 6) return { columns: 3, rows: 2 };
-  return { columns: 4, rows: 2 };
+function autoColumns(count) {
+  if (count <= 4) return 2;
+  if (count <= 6) return 3;
+  return 4;
+}
+
+function gridFor(count, columns) {
+  const requested = Number(columns);
+  const resolved = Number.isInteger(requested) && requested >= 1 && requested <= 4
+    ? Math.min(requested, count)
+    : autoColumns(count);
+  return { columns: resolved, rows: Math.ceil(count / resolved) };
 }
 
 function normalizeBounds(bounds) {
@@ -25,34 +33,53 @@ function normalizeBounds(bounds) {
   };
 }
 
-function tileBounds(index, count, screenBounds) {
-  const bounds = normalizeBounds(screenBounds);
-  const { columns, rows } = gridFor(count);
+function tileBounds(index, count, bounds, grid) {
+  const { columns, rows } = grid;
   const column = index % columns;
   const row = Math.floor(index / columns);
 
   const baseWidth = Math.floor(bounds.width / columns);
   const baseHeight = Math.floor(bounds.height / rows);
-  const isLastColumn = column === columns - 1;
-  const isLastRow = row === rows - 1;
+  // The trailing window of a row absorbs the rounding remainder so the grid
+  // reaches the far edge. A partial last row ends early, so its final window
+  // counts as trailing too and stretches across the gap.
+  const endsRow = column === columns - 1 || index === count - 1;
+  const endsColumn = row === rows - 1;
 
   return {
     left: bounds.left + column * baseWidth,
     top: bounds.top + row * baseHeight,
-    width: isLastColumn ? bounds.width - column * baseWidth : baseWidth,
-    height: isLastRow ? bounds.height - row * baseHeight : baseHeight,
+    width: endsRow ? bounds.width - column * baseWidth : baseWidth,
+    height: endsColumn ? bounds.height - row * baseHeight : baseHeight,
   };
+}
+
+// "Whole screen" uses the bounds the popup measured; "current window" asks the
+// browser, since the popup cannot see the geometry of the window behind it.
+async function resolveBounds(message) {
+  const screen = normalizeBounds(message.screenBounds);
+  if (message.tileTarget !== 'window') return screen;
+
+  try {
+    const windows = await api.windows.getAll({ windowTypes: ['normal'] });
+    const target = windows.find((window) => window.focused) ?? windows[0];
+    if (target && Number.isFinite(target.width) && target.width > 0) return normalizeBounds(target);
+  } catch {
+    // Fall back to the screen bounds below.
+  }
+
+  return screen;
 }
 
 function chatUrl(jobToken, slot) {
   return `https://chatgpt.com/#fanout=${encodeURIComponent(jobToken)}&slot=${slot}`;
 }
 
-async function createTiledWindows(jobToken, prompts, screenBounds) {
+async function createTiledWindows(jobToken, prompts, screenBounds, grid) {
   let unpositioned = 0;
 
   for (let index = 0; index < prompts.length; index += 1) {
-    const bounds = tileBounds(index, prompts.length, screenBounds);
+    const bounds = tileBounds(index, prompts.length, screenBounds, grid);
     const base = { url: chatUrl(jobToken, index), type: 'popup', focused: index === 0 };
 
     // Browsers reject bounds they consider off-screen — negative availLeft on a
@@ -87,6 +114,13 @@ async function launchFanout(message) {
 
   if (prompts.length < 2) throw new Error('At least two prompts are required.');
 
+  // Every tiled session is the same site under the same account, so the only way
+  // to tell the windows apart is the label the content script writes into the
+  // title bar.
+  const labels = Array.isArray(message.labels)
+    ? message.labels.map((label) => String(label).slice(0, LABEL_MAX))
+    : [];
+
   // Browsers stay open for weeks, so startup-only cleanup lets jobs pile up.
   await cleanupOldJobs();
 
@@ -94,7 +128,7 @@ async function launchFanout(message) {
   const createdAt = Date.now();
   const records = Object.fromEntries(prompts.map((prompt, index) => [
     `${JOB_PREFIX}${jobToken}:${index}`,
-    { prompt, createdAt },
+    { prompt, label: labels[index] ?? '', slot: index + 1, createdAt },
   ]));
   await api.storage.local.set(records);
 
@@ -103,7 +137,9 @@ async function launchFanout(message) {
     return { ok: true };
   }
 
-  const unpositioned = await createTiledWindows(jobToken, prompts, message.screenBounds);
+  const bounds = await resolveBounds(message);
+  const grid = gridFor(prompts.length, message.columns);
+  const unpositioned = await createTiledWindows(jobToken, prompts, bounds, grid);
   return { ok: true, unpositioned };
 }
 

@@ -4,12 +4,29 @@ const isDetached = new URLSearchParams(location.search).get('detached') === '1';
 const basePrompt = document.querySelector('#basePrompt');
 const countSelect = document.querySelector('#count');
 const separatorSelect = document.querySelector('#separator');
+const columnsSelect = document.querySelector('#columns');
+const tileTargetSelect = document.querySelector('#tileTarget');
+const layoutRow = document.querySelector('#layoutRow');
 const variances = document.querySelector('#variances');
 const launchButton = document.querySelector('#launch');
 const clearButton = document.querySelector('#clear');
 const detachButton = document.querySelector('#detach');
 const suggestButton = document.querySelector('#suggest');
 const status = document.querySelector('#status');
+
+const savedSetsSelect = document.querySelector('#savedSets');
+const saveSetButton = document.querySelector('#saveSet');
+const deleteSetButton = document.querySelector('#deleteSet');
+const saveSetPanel = document.querySelector('#saveSetPanel');
+const setNameInput = document.querySelector('#setName');
+const confirmSaveSetButton = document.querySelector('#confirmSaveSet');
+const cancelSaveSetButton = document.querySelector('#cancelSaveSet');
+
+const bulkButton = document.querySelector('#bulk');
+const bulkPanel = document.querySelector('#bulkPanel');
+const bulkText = document.querySelector('#bulkText');
+const applyBulkButton = document.querySelector('#applyBulk');
+const cancelBulkButton = document.querySelector('#cancelBulk');
 
 // Deliberately spread across rendering idioms so the sessions diverge instead of
 // converging on the same house style.
@@ -24,7 +41,11 @@ const PRESETS = [
   'retro-futurist screen print, misregistered halftone, four-color separation',
 ];
 
-let varianceValues = Array(8).fill('');
+const MAX_SESSIONS = 8;
+const LABEL_MAX = 40;
+
+let varianceValues = Array(MAX_SESSIONS).fill('');
+let savedSets = [];
 let saveTimer;
 let blankWarningIssued = false;
 
@@ -92,8 +113,15 @@ function currentSettings() {
     count: Number(countSelect.value),
     separator: separatorSelect.value,
     mode: activeMode(),
+    columns: columnsSelect.value,
+    tileTarget: tileTargetSelect.value,
     varianceValues,
   };
+}
+
+// Tiling options are meaningless once the sessions open as tabs.
+function syncLayoutVisibility() {
+  layoutRow.hidden = activeMode() === 'tabs';
 }
 
 async function saveSettings() {
@@ -106,22 +134,40 @@ function scheduleSave() {
   saveTimer = setTimeout(() => void saveSettings(), 250);
 }
 
+function applySettings(settings) {
+  basePrompt.value = settings.basePrompt ?? '';
+  countSelect.value = String(Math.min(MAX_SESSIONS, Math.max(2, settings.count ?? 4)));
+  separatorSelect.value = settings.separator ?? 'heading';
+  varianceValues = Array(MAX_SESSIONS).fill('').map((_, index) => settings.varianceValues?.[index] ?? '');
+
+  for (const area of variances.querySelectorAll('textarea')) {
+    area.value = varianceValues[Number(area.dataset.index)] ?? '';
+    area.classList.remove('blank');
+  }
+
+  blankWarningIssued = false;
+  renderVariances();
+}
+
 async function restoreSettings() {
-  const { fanoutSettings } = await api.storage.local.get('fanoutSettings');
+  const { fanoutSettings, fanoutSets } = await api.storage.local.get(['fanoutSettings', 'fanoutSets']);
+
+  savedSets = Array.isArray(fanoutSets) ? fanoutSets : [];
+  renderSavedSets();
+
   if (!fanoutSettings) {
     renderVariances();
+    syncLayoutVisibility();
     return;
   }
 
-  basePrompt.value = fanoutSettings.basePrompt ?? '';
-  countSelect.value = String(Math.min(8, Math.max(2, fanoutSettings.count ?? 4)));
-  separatorSelect.value = fanoutSettings.separator ?? 'heading';
-  varianceValues = Array(8).fill('').map((_, index) => fanoutSettings.varianceValues?.[index] ?? '');
-
   const mode = document.querySelector(`input[name="mode"][value="${fanoutSettings.mode ?? 'windows'}"]`);
   if (mode) mode.checked = true;
+  columnsSelect.value = fanoutSettings.columns ?? 'auto';
+  tileTargetSelect.value = fanoutSettings.tileTarget ?? 'screen';
 
-  renderVariances();
+  applySettings(fanoutSettings);
+  syncLayoutVisibility();
 }
 
 function composePrompt(shared, direction, style) {
@@ -172,6 +218,148 @@ function fillEmptyVariances() {
   void saveSettings();
 }
 
+function renderSavedSets() {
+  const previous = savedSetsSelect.value;
+  savedSetsSelect.replaceChildren();
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = savedSets.length ? '— pick a set —' : '— none saved —';
+  savedSetsSelect.append(placeholder);
+
+  for (const set of savedSets) {
+    const option = document.createElement('option');
+    option.value = set.name;
+    option.textContent = set.name;
+    savedSetsSelect.append(option);
+  }
+
+  savedSetsSelect.value = savedSets.some((set) => set.name === previous) ? previous : '';
+  deleteSetButton.disabled = !savedSetsSelect.value;
+}
+
+async function persistSets() {
+  await api.storage.local.set({ fanoutSets: savedSets });
+}
+
+function openSavePanel() {
+  bulkPanel.hidden = true;
+  saveSetPanel.hidden = false;
+  // Saving over the loaded set is the common case; a fresh name is one edit away.
+  setNameInput.value = savedSetsSelect.value || basePrompt.value.trim().split(/\s+/).slice(0, 5).join(' ');
+  setNameInput.focus();
+  setNameInput.select();
+}
+
+async function saveSet() {
+  const name = setNameInput.value.trim();
+  if (!name) {
+    setStatus('Give the set a name.', true);
+    setNameInput.focus();
+    return;
+  }
+
+  const settings = currentSettings();
+  // Only the composition travels with a set. Window mode and tiling are standing
+  // preferences, not part of the concept.
+  const record = {
+    name,
+    basePrompt: settings.basePrompt,
+    count: settings.count,
+    separator: settings.separator,
+    varianceValues: settings.varianceValues.slice(0, MAX_SESSIONS),
+    savedAt: Date.now(),
+  };
+
+  const existing = savedSets.findIndex((set) => set.name.toLowerCase() === name.toLowerCase());
+  if (existing === -1) savedSets.push(record);
+  else savedSets[existing] = record;
+
+  savedSets.sort((a, b) => a.name.localeCompare(b.name));
+  await persistSets();
+
+  saveSetPanel.hidden = true;
+  renderSavedSets();
+  savedSetsSelect.value = name;
+  deleteSetButton.disabled = false;
+  setStatus(existing === -1 ? `Saved "${name}".` : `Updated "${name}".`);
+}
+
+async function deleteSet() {
+  const name = savedSetsSelect.value;
+  if (!name) return;
+
+  savedSets = savedSets.filter((set) => set.name !== name);
+  await persistSets();
+  renderSavedSets();
+  setStatus(`Deleted "${name}".`);
+}
+
+function loadSet() {
+  const name = savedSetsSelect.value;
+  deleteSetButton.disabled = !name;
+  if (!name) return;
+
+  const set = savedSets.find((entry) => entry.name === name);
+  if (!set) return;
+
+  applySettings(set);
+  void saveSettings();
+  setStatus(`Loaded "${name}".`);
+}
+
+// A blank line separates entries only when the list is line-per-variance; an
+// explicit `---` rule lets a single variance span several lines.
+function parseBulk(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+
+  const entries = /^\s*---+\s*$/m.test(trimmed)
+    ? trimmed.split(/^\s*---+\s*$/m)
+    : trimmed.split(/\r?\n/);
+
+  return entries.map((entry) => entry.trim()).filter(Boolean).slice(0, MAX_SESSIONS);
+}
+
+function applyBulk() {
+  const entries = parseBulk(bulkText.value);
+  if (!entries.length) {
+    setStatus('Nothing to paste in.', true);
+    bulkText.focus();
+    return;
+  }
+
+  syncValuesFromDom();
+  entries.forEach((entry, index) => {
+    varianceValues[index] = entry;
+  });
+
+  // Match the session count to the list. Values past the new count stay in
+  // varianceValues, so raising the count again brings them back.
+  countSelect.value = String(Math.min(MAX_SESSIONS, Math.max(2, entries.length)));
+
+  for (const area of variances.querySelectorAll('textarea')) {
+    const index = Number(area.dataset.index);
+    area.value = varianceValues[index] ?? '';
+    area.classList.remove('blank');
+  }
+
+  renderVariances();
+  blankWarningIssued = false;
+  bulkPanel.hidden = true;
+  bulkText.value = '';
+  void saveSettings();
+  setStatus(`Filled ${entries.length} ${entries.length === 1 ? 'session' : 'sessions'} from the list.`);
+}
+
+// The window title has very little room, so cut the variance at its first clause.
+// An empty label leaves the content script on its "Session N" fallback.
+function labelFor(variance) {
+  const first = variance.trim().split(/[,.;\n]/)[0].trim();
+  if (!first) return '';
+  return first.length > LABEL_MAX ? `${first.slice(0, LABEL_MAX - 1).trimEnd()}…` : first;
+}
+
 async function launch() {
   const settings = currentSettings();
   const shared = settings.basePrompt.trim();
@@ -196,9 +384,9 @@ async function launch() {
     return;
   }
 
-  const prompts = settings.varianceValues
-    .slice(0, settings.count)
-    .map((direction) => composePrompt(shared, direction, settings.separator));
+  const directions = settings.varianceValues.slice(0, settings.count);
+  const prompts = directions.map((direction) => composePrompt(shared, direction, settings.separator));
+  const labels = directions.map((direction) => labelFor(direction));
 
   launchButton.disabled = true;
   clearButton.disabled = true;
@@ -217,7 +405,10 @@ async function launch() {
     const response = await api.runtime.sendMessage({
       type: 'launch-fanout',
       prompts,
+      labels,
       mode: settings.mode,
+      columns: settings.columns === 'auto' ? undefined : Number(settings.columns),
+      tileTarget: settings.tileTarget,
       screenBounds,
     });
 
@@ -245,12 +436,15 @@ async function launch() {
 
 async function clearForm() {
   basePrompt.value = '';
-  varianceValues = Array(8).fill('');
+  varianceValues = Array(MAX_SESSIONS).fill('');
   for (const area of variances.querySelectorAll('textarea')) {
     area.value = '';
     area.classList.remove('blank');
   }
   blankWarningIssued = false;
+  // The form no longer reflects whatever set was loaded.
+  savedSetsSelect.value = '';
+  deleteSetButton.disabled = true;
   setStatus('');
   await saveSettings();
   basePrompt.focus();
@@ -270,20 +464,48 @@ countSelect.addEventListener('change', () => {
   scheduleSave();
 });
 separatorSelect.addEventListener('change', scheduleSave);
+columnsSelect.addEventListener('change', scheduleSave);
+tileTargetSelect.addEventListener('change', scheduleSave);
 basePrompt.addEventListener('input', scheduleSave);
 for (const radio of document.querySelectorAll('input[name="mode"]')) {
-  radio.addEventListener('change', scheduleSave);
+  radio.addEventListener('change', () => {
+    syncLayoutVisibility();
+    scheduleSave();
+  });
 }
 launchButton.addEventListener('click', () => void launch());
 clearButton.addEventListener('click', () => void clearForm());
 suggestButton.addEventListener('click', fillEmptyVariances);
 detachButton.addEventListener('click', () => void detach());
 
-document.addEventListener('keydown', (event) => {
-  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+savedSetsSelect.addEventListener('change', loadSet);
+saveSetButton.addEventListener('click', openSavePanel);
+confirmSaveSetButton.addEventListener('click', () => void saveSet());
+cancelSaveSetButton.addEventListener('click', () => { saveSetPanel.hidden = true; });
+deleteSetButton.addEventListener('click', () => void deleteSet());
+setNameInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
     event.preventDefault();
-    void launch();
+    void saveSet();
   }
+});
+
+bulkButton.addEventListener('click', () => {
+  saveSetPanel.hidden = true;
+  bulkPanel.hidden = !bulkPanel.hidden;
+  if (!bulkPanel.hidden) bulkText.focus();
+});
+applyBulkButton.addEventListener('click', applyBulk);
+cancelBulkButton.addEventListener('click', () => { bulkPanel.hidden = true; });
+
+document.addEventListener('keydown', (event) => {
+  if (!(event.metaKey || event.ctrlKey) || event.key !== 'Enter') return;
+  event.preventDefault();
+
+  // Inside an open panel the shortcut belongs to that panel, not to Launch.
+  if (event.target === bulkText) applyBulk();
+  else if (event.target === setNameInput) void saveSet();
+  else void launch();
 });
 
 // The debounced save never fires if the popup is dismissed first — its timers die

@@ -109,6 +109,24 @@
     fillContentEditable(editor, text);
   }
 
+  // Eight tiled sessions are the same site under the same account, so the tab and
+  // title bar are identical everywhere. Stamp the slot and its variance on the
+  // front of the title. ChatGPT rewrites the title on every navigation, so this
+  // has to keep re-applying rather than set it once.
+  function labelWindow(text) {
+    const prefix = `${text} · `;
+    const apply = () => {
+      if (!document.title.startsWith(prefix)) document.title = prefix + document.title;
+    };
+
+    apply();
+    new MutationObserver(apply).observe(document.head, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
+
   function cleanUrl() {
     try {
       history.replaceState(history.state, '', `${location.pathname}${location.search}`);
@@ -184,6 +202,10 @@
       cleanUrl();
       return;
     }
+
+    // Label first: it is useful even if the composer never turns up.
+    const position = record.slot ?? slot + 1;
+    labelWindow(record.label ? `${position} · ${record.label}` : `Session ${position}`);
 
     // Keep the record until the prompt is actually in the composer. Removing it
     // first meant a login redirect or reload during the wait lost the prompt for
