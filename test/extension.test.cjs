@@ -74,7 +74,7 @@ const check = (name, pass, detail = '') => {
   check('count change reuses existing textarea nodes', preserved.sameNode, JSON.stringify(preserved));
   check('count change grows the list to 7', preserved.rows === 7);
 
-  // --- 4. Blank-variance guard ---
+  // --- 4. A blank variance launches on the first click, no confirmation step ---
   const guard = await page.evaluate(async () => {
     const c = document.querySelector('#count');
     c.value = '2'; c.dispatchEvent(new Event('change'));
@@ -86,20 +86,14 @@ const check = (name, pass, detail = '') => {
     await new Promise((r) => setTimeout(r, 30));
 
     document.querySelector('#launch').click();
-    await new Promise((r) => setTimeout(r, 150));
-    const firstClick = document.querySelector('#status').textContent;
-    const marked = document.querySelectorAll('#variances textarea.blank').length;
-
-    document.querySelector('#launch').click();
-    await new Promise((r) => setTimeout(r, 1200));
-    return { firstClick, marked, secondClick: document.querySelector('#status').textContent };
+    await new Promise((r) => setTimeout(r, 1600));
+    return { status: document.querySelector('#status').textContent };
   });
-  check('blank variance warns before launching', /identical/.test(guard.firstClick), guard.firstClick);
-  check('blank field is visually marked', guard.marked === 1, `marked=${guard.marked}`);
-  check('second click proceeds to launch', /Opened 2/.test(guard.secondClick), guard.secondClick);
+  check('a blank variance launches on the first click', /Opened 2/.test(guard.status), guard.status);
+  check('no second-click confirmation is demanded', !/Launch again/.test(guard.status), guard.status);
 
-  // --- 5. Bounds rejection degrades instead of aborting ---
-  check('tiling failure reported, not fatal', /could not be tiled|independent sessions/.test(guard.secondClick), guard.secondClick);
+  // --- 5. Placement problems are reported, not fatal ---
+  check('launch reports what actually happened', /Opened 2 sessions/.test(guard.status), guard.status);
 
   // --- 6. "Fill empty" gives distinct presets ---
   const filled = await page.evaluate(async () => {
@@ -212,20 +206,46 @@ const check = (name, pass, detail = '') => {
   check('layout row returns in windows mode', layout.shownInWindows === false);
   check('layout choices persist', layoutSaved.columns === '3' && layoutSaved.tileTarget === 'window', JSON.stringify(layoutSaved));
 
-  // Grid math, straight from the worker: an explicit column count wins, "auto"
-  // falls back, and the trailing window of a partial row reaches the edge.
+  // Grid math, straight from the worker.
   const grid = await sw.evaluate(() => {
-    const screen = { left: 0, top: 0, width: 1200, height: 800 };
-    const explicit = gridFor(6, 2);
-    const auto = gridFor(6, undefined);
-    const clamped = gridFor(2, 4);
-    const partial = tileBounds(4, 5, screen, gridFor(5, 2));
-    return { explicit, auto, clamped, partial };
+    const big = { left: 0, top: 0, width: 1920, height: 1080 };
+    const small = { left: 0, top: 0, width: 1280, height: 720 };
+    return {
+      explicit: gridFor(6, 2, big),
+      clamped: gridFor(2, 4, big),
+      auto2: gridFor(2, undefined, big),
+      auto4: gridFor(4, undefined, big),
+      auto6: gridFor(6, undefined, big),
+      auto8: gridFor(8, undefined, big),
+      cramped: gridFor(8, undefined, small),
+      partial: tileBounds(4, 5, big, gridFor(5, 2, big)),
+    };
   });
   check('explicit column count is honoured', grid.explicit.columns === 2 && grid.explicit.rows === 3, JSON.stringify(grid.explicit));
-  check('auto keeps the original layout', grid.auto.columns === 3 && grid.auto.rows === 2, JSON.stringify(grid.auto));
   check('columns never exceed the session count', grid.clamped.columns === 2, JSON.stringify(grid.clamped));
-  check('trailing window of a partial row spans the width', grid.partial.width === 1200 && grid.partial.left === 0, JSON.stringify(grid.partial));
+  check('auto keeps 2 columns for 2 sessions', grid.auto2.columns === 2 && grid.auto2.rows === 1, JSON.stringify(grid.auto2));
+  check('auto keeps 2×2 for 4 sessions', grid.auto4.columns === 2 && grid.auto4.rows === 2, JSON.stringify(grid.auto4));
+  check('auto keeps 3×2 for 6 sessions', grid.auto6.columns === 3 && grid.auto6.rows === 2, JSON.stringify(grid.auto6));
+  // 4×2 on a 1920 screen gives 480px-wide tiles, under the minimum window width,
+  // so the grid that actually fits is 3×3.
+  check('auto avoids a grid narrower than the browser minimum',
+    grid.auto8.columns === 3 && grid.auto8.rows === 3 && grid.auto8.slack >= 1, JSON.stringify(grid.auto8));
+  check('a screen too small to tile is flagged rather than faked',
+    grid.cramped.slack < 1, JSON.stringify(grid.cramped));
+  check('trailing window of a partial row spans the width', grid.partial.width === 1920 && grid.partial.left === 0, JSON.stringify(grid.partial));
+
+  // Placement is verified after the fact, since windows.create neither throws
+  // nor reports the bounds the window actually settles at.
+  const verified = await sw.evaluate(async () => {
+    const win = await chrome.windows.create({ url: 'about:blank', type: 'popup', left: 0, top: 0, width: 400, height: 300 });
+    const asked = { left: 0, top: 0, width: 400, height: 300 };
+    const misplaced = await countMisplaced([{ id: win.id, bounds: asked }]);
+    const ghost = await countMisplaced([{ id: 999999, bounds: asked }]);
+    await chrome.windows.remove(win.id).catch(() => {});
+    return { misplaced, ghost };
+  });
+  check('drift from the requested bounds is detected', verified.misplaced === 1, `misplaced=${verified.misplaced}`);
+  check('an already-closed window is not counted as misplaced', verified.ghost === 0, `ghost=${verified.ghost}`);
 
   // --- 6e. Labels ride along with the job records ---
   const labelled = await page.evaluate(async () => {

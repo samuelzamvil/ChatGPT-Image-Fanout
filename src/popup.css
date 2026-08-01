@@ -198,10 +198,6 @@ body.detached #variances {
   min-height: 60px;
 }
 
-.variance textarea.blank {
-  border-color: #c74343;
-}
-
 .actions {
   position: sticky;
   bottom: 0;
