@@ -1,16 +1,12 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Image Fanout",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Fan one image concept out into 2–8 independent ChatGPT sessions with separate variance instructions.",
-  "permissions": [
-    "storage",
-    "tabs"
-  ],
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
   "background": {
-    "scripts": [
-      "background.js"
-    ]
+    "scripts": ["background.js"]
   },
   "action": {
     "default_title": "ChatGPT Image Fanout",
@@ -30,27 +26,18 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://chatgpt.com/*"
-      ],
-      "js": [
-        "content.js"
-      ],
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": ["content.js"],
       "run_at": "document_idle"
     }
   ],
   "browser_specific_settings": {
     "gecko": {
-      "id": "chatgpt-image-fanout@example.local",
-      "strict_min_version": "128.0",
+      "id": "chatgpt-image-fanout@samuelzamvil.github.io",
+      "strict_min_version": "140.0",
       "data_collection_permissions": {
-        "required": [
-          "none"
-        ]
+        "required": ["none"]
       }
     }
-  },
-  "host_permissions": [
-    "https://chatgpt.com/*"
-  ]
+  }
 }
