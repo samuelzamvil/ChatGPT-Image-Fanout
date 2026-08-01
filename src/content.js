@@ -164,8 +164,12 @@
       fontWeight: '700',
     });
     button.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(prompt);
-      button.textContent = 'Copied';
+      try {
+        await navigator.clipboard.writeText(prompt);
+        button.textContent = 'Copied';
+      } catch {
+        button.textContent = 'Copy blocked — select the text above';
+      }
     });
 
     panel.append(title, body, button);
@@ -181,16 +185,19 @@
       return;
     }
 
-    await api.storage.local.remove(key);
+    // Keep the record until the prompt is actually in the composer. Removing it
+    // first meant a login redirect or reload during the wait lost the prompt for
+    // good; on failure the 15-minute TTL still clears it.
     const editor = await waitForEditor();
     if (editor) {
       fillEditor(editor, prompt);
       editor.focus();
-    } else {
-      showFallback(prompt);
+      await api.storage.local.remove(key);
+      cleanUrl();
+      return;
     }
 
-    cleanUrl();
+    showFallback(prompt);
   }
 
   void run();

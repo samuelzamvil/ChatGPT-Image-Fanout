@@ -1,6 +1,7 @@
 const api = globalThis.browser ?? globalThis.chrome;
 const JOB_PREFIX = 'fanoutJob:';
 const JOB_TTL_MS = 15 * 60 * 1000;
+const DETACHED_URL = 'popup.html?detached=1';
 
 function token() {
   const bytes = new Uint8Array(16);
@@ -48,15 +49,24 @@ function chatUrl(jobToken, slot) {
 }
 
 async function createTiledWindows(jobToken, prompts, screenBounds) {
+  let unpositioned = 0;
+
   for (let index = 0; index < prompts.length; index += 1) {
     const bounds = tileBounds(index, prompts.length, screenBounds);
-    await api.windows.create({
-      url: chatUrl(jobToken, index),
-      type: 'popup',
-      focused: index === 0,
-      ...bounds,
-    });
+    const base = { url: chatUrl(jobToken, index), type: 'popup', focused: index === 0 };
+
+    // Browsers reject bounds they consider off-screen — negative availLeft on a
+    // secondary monitor, DPI scaling, a display unplugged mid-launch. Losing the
+    // tiling is acceptable; losing the session is not.
+    try {
+      await api.windows.create({ ...base, ...bounds });
+    } catch {
+      unpositioned += 1;
+      await api.windows.create(base);
+    }
   }
+
+  return unpositioned;
 }
 
 async function createTabs(jobToken, prompts) {
@@ -77,6 +87,9 @@ async function launchFanout(message) {
 
   if (prompts.length < 2) throw new Error('At least two prompts are required.');
 
+  // Browsers stay open for weeks, so startup-only cleanup lets jobs pile up.
+  await cleanupOldJobs();
+
   const jobToken = token();
   const createdAt = Date.now();
   const records = Object.fromEntries(prompts.map((prompt, index) => [
@@ -87,11 +100,27 @@ async function launchFanout(message) {
 
   if (message.mode === 'tabs') {
     await createTabs(jobToken, prompts);
-  } else {
-    await createTiledWindows(jobToken, prompts, message.screenBounds);
+    return { ok: true };
   }
 
-  return { ok: true };
+  const unpositioned = await createTiledWindows(jobToken, prompts, message.screenBounds);
+  return { ok: true, unpositioned };
+}
+
+// Reuse an already-open detached window instead of stacking duplicates.
+async function openDetached() {
+  const url = api.runtime.getURL(DETACHED_URL);
+  const existing = await api.tabs.query({ url });
+
+  if (existing.length) {
+    const [tab] = existing;
+    await api.windows.update(tab.windowId, { focused: true });
+    await api.tabs.update(tab.id, { active: true });
+    return { ok: true, reused: true };
+  }
+
+  await api.windows.create({ url, type: 'popup', width: 560, height: 820 });
+  return { ok: true, reused: false };
 }
 
 async function cleanupOldJobs() {
@@ -104,15 +133,26 @@ async function cleanupOldJobs() {
   if (staleKeys.length) await api.storage.local.remove(staleKeys);
 }
 
-api.runtime.onMessage.addListener((message) => {
-  if (message?.type === 'launch-fanout') {
-    return launchFanout(message).catch((error) => ({
+const handlers = {
+  'launch-fanout': launchFanout,
+  'open-detached': openDetached,
+};
+
+api.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const handler = handlers[message?.type];
+  if (!handler) return undefined;
+
+  // Chrome ignores a returned Promise and closes the channel immediately, which
+  // surfaces in the popup as a failure even though the launch succeeded. The
+  // response has to go through sendResponse behind a synchronous `return true`.
+  handler(message)
+    .then(sendResponse)
+    .catch((error) => sendResponse({
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     }));
-  }
 
-  return undefined;
+  return true;
 });
 
 api.runtime.onStartup?.addListener(() => void cleanupOldJobs());
