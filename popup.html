@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChatGPT Image Fanout</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <h1>ChatGPT Image Fanout</h1>
+    <p class="subtitle">Open independent new-chat panels with one shared concept and separate variance instructions. Prompts are filled but not submitted.</p>
+
+    <label for="basePrompt">Shared image concept</label>
+    <textarea id="basePrompt" placeholder="Describe the subject, non-negotiable elements, aspect ratio, required text, and anything every direction must preserve."></textarea>
+
+    <div class="row">
+      <label for="count">Sessions
+        <select id="count">
+          <option>2</option>
+          <option>3</option>
+          <option selected>4</option>
+          <option>5</option>
+          <option>6</option>
+          <option>7</option>
+          <option>8</option>
+        </select>
+      </label>
+
+      <label for="separator">Direction label
+        <select id="separator">
+          <option value="heading" selected>Explicit heading</option>
+          <option value="plain">Plain paragraph</option>
+          <option value="none">Append only</option>
+        </select>
+      </label>
+    </div>
+
+    <fieldset>
+      <legend>Open as</legend>
+      <div class="mode-options">
+        <label><input type="radio" name="mode" value="windows" checked> Tiled windows</label>
+        <label><input type="radio" name="mode" value="tabs"> Tabs</label>
+      </div>
+    </fieldset>
+
+    <div class="variance-header">
+      <label>Variance instructions</label>
+      <span>One field per session</span>
+    </div>
+    <div id="variances"></div>
+
+    <p id="status" role="status"></p>
+
+    <div class="actions">
+      <button id="clear" type="button">Clear</button>
+      <button id="launch" type="button">Launch 4 sessions</button>
+    </div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
