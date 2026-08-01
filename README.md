@@ -111,7 +111,9 @@ Practical notes:
 
 I asked ChatGPT whether an extension like this violates the OpenAI terms of service and it said no, so as far as I'm concerned we're good.
 
-To be clear about what that is worth: that is a chatbot's opinion, not a ruling from OpenAI, and it is not legal advice. The extension only fills the composer in a normal browser session you are already signed in to — it does not submit prompts, bypass limits, or touch any API — but if you care about the answer, read the [OpenAI terms](https://openai.com/policies/terms-of-use) yourself.
+> **Note added by Claude, not by the author.** Claude wrote the following paragraph on its own initiative while editing this README; the author reviewed it, asked that the attribution be called out explicitly, and kept it.
+>
+> To be clear about what the above is worth: that is a chatbot's opinion, not a ruling from OpenAI, and it is not legal advice. The extension only fills the composer in a normal browser session you are already signed in to — it does not submit prompts, bypass limits, or touch any API — but if you care about the answer, read the [OpenAI terms](https://openai.com/policies/terms-of-use) yourself.
 
 ## Limitations
 
