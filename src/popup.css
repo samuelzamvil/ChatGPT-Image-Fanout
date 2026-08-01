@@ -13,7 +13,27 @@ body {
   color: CanvasText;
 }
 
+/* Detached mode is a real resizable window, so drop the fixed popup width. */
+body.detached {
+  width: auto;
+  min-width: 420px;
+  min-height: 100vh;
+}
+
 main { padding: 18px; }
+
+body.detached main {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 
 h1 {
   margin: 0;
@@ -84,20 +104,27 @@ fieldset {
 
 .variance-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   margin-top: 16px;
 }
 
-.variance-header span {
-  color: color-mix(in srgb, CanvasText 55%, transparent);
-  font-size: 11px;
+.variance-header h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 #variances {
   max-height: 265px;
   overflow-y: auto;
   padding-right: 4px;
+}
+
+/* In a detached window the list gets the leftover height instead of a hard cap. */
+body.detached #variances {
+  flex: 1;
+  max-height: none;
 }
 
 .variance {
@@ -122,6 +149,10 @@ fieldset {
 
 .variance textarea {
   min-height: 60px;
+}
+
+.variance textarea.blank {
+  border-color: #c74343;
 }
 
 .actions {
@@ -155,6 +186,23 @@ button {
 
 #clear {
   background: color-mix(in srgb, CanvasText 10%, transparent);
+  color: CanvasText;
+}
+
+.ghost {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in srgb, CanvasText 75%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ghost:hover {
+  background: color-mix(in srgb, CanvasText 8%, transparent);
   color: CanvasText;
 }
 
